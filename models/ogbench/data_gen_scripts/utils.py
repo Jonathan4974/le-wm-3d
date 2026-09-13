@@ -72,6 +72,47 @@ def _depths_to_world_points_with_colors(
     return np.concatenate(pts_all, 0), np.concatenate(col_all, 0), np.concatenate(atten_all, 0)
 
 
+def depth_to_normals_with_intrinsics(depth, K):
+    """
+    depth : (H,W)
+    K     : (3,3)
+
+    returns
+        normals : (H,W,3)
+    """
+
+    fx = K[0,0]
+    fy = K[1,1]
+    cx = K[0,2]
+    cy = K[1,2]
+
+    H, W = depth.shape
+
+    u, v = np.meshgrid(
+        np.arange(W, dtype=np.float32),
+        np.arange(H, dtype=np.float32),
+        indexing="xy",
+    )
+
+    X = (u - cx) * depth / fx
+    Y = (v - cy) * depth / fy
+    Z = depth
+
+    V = np.stack((X, Y, Z), axis=-1)
+
+    normals = np.zeros_like(V)
+
+    dx = V[:,2:] - V[:,:-2]
+    dy = V[2:,:] - V[:-2,:]
+
+    n = np.cross(dx[1:-1], dy[:,1:-1])
+
+    n /= np.linalg.norm(n, axis=-1, keepdims=True) + 1e-8
+
+    normals[1:-1,1:-1] = n
+
+    return normals
+
 
 def _as_homogeneous44(ext: np.ndarray) -> np.ndarray:
     """

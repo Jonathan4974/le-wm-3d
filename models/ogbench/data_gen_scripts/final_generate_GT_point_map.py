@@ -32,25 +32,79 @@ from utils import extract_data, _depths_to_world_points_with_colors
 
 import gymnasium
 
-SOURCE_FILE = Path("~/data/ogbench/cube_single_expert.h5").expanduser()
+SOURCE_FILE = Path("~/data/ogbench/datasets/ogbench/cube_single_expert.h5").expanduser()
 print("Reading h5 from ", SOURCE_FILE)
 print("Found: ", Path(SOURCE_FILE).exists())
 EPISODE_IDS_PATH = "/home/student/users/Aaron_workspace/le-wm-3DGeom/models/le-wm/episode_order.pt"
 episode_ids = torch.load(EPISODE_IDS_PATH)
 
 
-N_EPISODES_TRAIN = 1000
-N_EPISODES_VAL = 100
-# N_EPISODES_TRAIN = 100
-# N_EPISODES_VAL = 10
+# N_EPISODES_TRAIN = 1000
+# N_EPISODES_VAL = 100
+N_EPISODES_TRAIN = 10
+N_EPISODES_VAL = 1
 train_episode_ids = episode_ids[:N_EPISODES_TRAIN]
 val_episode_ids = episode_ids[N_EPISODES_TRAIN : N_EPISODES_TRAIN + N_EPISODES_VAL]
 
 selected_episode_ids = episode_ids[:N_EPISODES_TRAIN + N_EPISODES_VAL]
 
-TARGET_FILE = Path(f"~/data/ogbench/gt_point_map_{N_EPISODES_TRAIN}_val_{N_EPISODES_VAL}_episodes.h5").expanduser()
+TARGET_FILE = Path(f"~/data/ogbench/gt_point_map_quantiz_small_shuffle_{N_EPISODES_TRAIN}_val_{N_EPISODES_VAL}_episodes.h5").expanduser()
 print("Writing new h5 to ", TARGET_FILE)
 
+
+# --------------------------------------------------
+#    quantization and dequantization function
+#---------------------------------------------------
+def quantize_pointcloud(points):
+    """
+    Args: points: (H, W, 3), float32
+    Returns: q_points: (H, W, 3), uint16
+    """
+    # Global quantization parameters
+    XYZ_MIN = np.array(
+        [-1.023597, -0.84242713, 0.001695069],
+        dtype=np.float32,
+    )
+
+    XYZ_MAX = np.array(
+        [0.70306283, 0.8070305, 0.39999232],
+        dtype=np.float32,
+    )
+
+    XYZ_SCALE = XYZ_MAX - XYZ_MIN
+
+    q_points = np.round(
+        (points - XYZ_MIN) / XYZ_SCALE * 65535.0
+    )
+
+    q_points = np.clip(q_points, 0, 65535)
+
+    return q_points.astype(np.uint16)
+
+def dequantize_pointcloud(q_points):
+    """
+    Args: q_points: (H, W, 3), uint16
+    Returns: points: (H, W, 3), float32
+    """
+
+    # Global quantization parameters
+    XYZ_MIN = np.array(
+        [-1.023597, -0.84242713, 0.001695069],
+        dtype=np.float32,
+    )
+
+    XYZ_MAX = np.array(
+        [0.70306283, 0.8070305, 0.39999232],
+        dtype=np.float32,
+    )
+
+    XYZ_SCALE = XYZ_MAX - XYZ_MIN
+
+    points = (
+        q_points.astype(np.float32) / 65535.0
+    ) * XYZ_SCALE + XYZ_MIN
+
+    return points
 # --------------------------------------------------
 # Initialize OGBench environment
 # --------------------------------------------------
@@ -114,9 +168,10 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
     gt_points = f_tgt.create_dataset(
         "pixels",
         shape=(total_frames, H, W, 3),
-        dtype=np.float32,
+        dtype=np.uint16,
         chunks=(1, H, W, 3),
         compression="lzf",
+        shuffle=True,
     )
 
     gt_color = f_tgt.create_dataset(
@@ -125,15 +180,16 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
         dtype=np.uint8,
         chunks=(1, H, W, 3),
         compression="lzf",
+        shuffle=True,
     )
 
-    gt_mask = f_tgt.create_dataset(
-        "atten_mask",
-        shape=(total_frames, H, W),
-        dtype=bool,
-        chunks=(1, H, W),
-        compression="lzf",
-    )
+    # gt_mask = f_tgt.create_dataset(
+    #     "atten_mask",
+    #     shape=(total_frames, H, W),
+    #     dtype=bool,
+    #     chunks=(1, H, W),
+    #     compression="lzf",
+    # )
 
     keys_to_copy = [
         k for k in f_src.keys()
@@ -164,6 +220,9 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
 
     write_idx = 0
 
+    # global_min = np.full(3, np.inf, dtype=np.float32)
+    # global_max = np.full(3, -np.inf, dtype=np.float32)
+
     for ep in tqdm(selected_episode_ids, desc="Episodes"):
 
         ep = int(ep)
@@ -187,7 +246,7 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
 
         ep_pts3d = []
         ep_color = []
-        ep_atten_mask = []
+        # ep_atten_mask = []
 
         for local_idx in tqdm(range(length), desc=f"Epoch {ep} Processing", leave=False):
             qpos = ep_qpos[local_idx]
@@ -239,6 +298,11 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 pose="GLB",
             )
 
+            # min_vals = np.min(points, axis=(0, 1))  # [min_x, min_y, min_z]
+            # max_vals = np.max(points, axis=(0, 1))  # [max_x, max_y, max_z]
+            # global_min = np.minimum(global_min, min_vals)
+            # global_max = np.maximum(global_max, max_vals)
+
             # print("points shape", points.shape)
             # print("points type", points.dtype)
             # print("colors shape", colors.shape)
@@ -255,15 +319,15 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 '''
             # print("The attention are all True:", attention_mask.all().item() )
             
-            ep_pts3d.append(points)
-            ep_color.append(colors)
-            ep_atten_mask.append(attention_mask)
+            ep_pts3d.append(quantize_pointcloud(points))
+            # ep_color.append(colors)
+            # ep_atten_mask.append(attention_mask)
 
         tgt_slice = slice(write_idx, write_idx + length)
             
         gt_points[tgt_slice] = np.stack(ep_pts3d, axis=0)
         gt_color[tgt_slice] = np.stack(ep_color, axis=0)
-        gt_mask[tgt_slice] = np.stack(ep_atten_mask, axis=0)
+        # gt_mask[tgt_slice] = np.stack(ep_atten_mask, axis=0)
 
         for key in keys_to_copy:
             output_datasets[key][tgt_slice] = cached_src_data[key]

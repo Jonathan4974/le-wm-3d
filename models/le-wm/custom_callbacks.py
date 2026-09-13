@@ -18,6 +18,8 @@ from einops import repeat
 import matplotlib.pyplot as plt
 import umap
 from sklearn.manifold import TSNE
+from mpl_toolkits.mplot3d import Axes3D
+
 
 class PredictorFeatureImportanceWrapper(torch.nn.Module):
     def __init__(self, predictor):
@@ -63,115 +65,214 @@ class LatentTSENPlots(Callback):
 
                 obs = batch["observation"]      # [B,26]
                 print("obs.shape=", obs.shape)
+
                 physical_state = torch.cat([
-                    obs[:, :, 12:15],          # ee    
                     obs[:, :, 19:22],          # cube
                 ], dim=-1)
 
-                gt_states.append(physical_state.reshape(-1, 6).cpu().numpy())
+                gt_states.append(physical_state.reshape(-1, 3).cpu().numpy())
                 print("encoded batch=", i)
 
                 if i >= MAX_BATCHES:
                     break
 
         print("Done with latent encoding")
+
+        pred_latents = np.concatenate(pred_latents, axis=0)   # [N,192]
+        gt_states = np.concatenate(gt_states, axis=0)         # [N,3]
+
+        print(pred_latents.shape)
+        print(gt_states.shape)
+
+        # # Cube X coordinate
+        # y = gt_states[:, 0]           # assuming gt_states = [cube_x, cube_y, cube_z]
+        # X = pred_latents              # [N, 192]
+
+        # probe = LinearRegression()
+        # probe.fit(X, y)
+
+        # pred = probe.predict(X)
+        # r2 = r2_score(y, pred)
+        # plt.figure(figsize=(5,5))
+        # plt.scatter(
+        #     y,
+        #     pred,
+        #     s=4,
+        #     alpha=0.2,
+        # )
+        # lims = [
+        #     min(y.min(), pred.min()),
+        #     max(y.max(), pred.max()),
+        # ]
+
+        # plt.plot(lims, lims, "r--", linewidth=2)
+        # plt.xlabel("Ground Truth Cube X")
+        # plt.ylabel("Linear Probe Prediction")
+        # plt.title(f"$R^2$ = {r2:.3f}")
+        # plt.tight_layout()
+        # plt.savefig(f"{self.output_dir}/linear_probe_cube_x.png")
+        # plt.close()
+
+        Y = gt_states          # (N, 3)
+
+        probe = LinearRegression()
+        probe.fit(pred_latents, Y)
+
+        pred = probe.predict(pred_latents)
+
+        print(pred.shape) 
+
+        # X: latent vectors
+        X = pred_latents
+
+        # Y: cube position (x,y,z)
+        Y = gt_states
+
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot(111, projection="3d")
+
+        N = 5
+        # or:
+        # idx = np.random.choice(len(Y), N, replace=False)
+        idx = np.linspace(0, len(Y)-1, 5, dtype=int)
+
+        for i in idx:
+            # Ground truth
+            ax.scatter(
+                Y[i, 0], Y[i, 1], Y[i, 2],
+                color="tab:blue",
+                s=80,
+                alpha = 0.8,
+                label="Ground Truth" if i == 0 else None,
+            )
+
+            # Prediction
+            ax.scatter(
+                pred[i, 0], pred[i, 1], pred[i, 2],
+                color="tab:orange",
+                marker="^",
+                s=60,
+                alpha = 0.8,
+                label="Linear Probe" if i == 0 else None,
+            )
+
+            # Connect them
+            ax.plot(
+                [Y[i, 0], pred[i, 0]],
+                [Y[i, 1], pred[i, 1]],
+                [Y[i, 2], pred[i, 2]],
+                "k--",
+                linewidth=1,
+            )
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.legend(loc="upper right")
+
+        ax.legend(["Error", "Ground Truth", "Prediction"])
+        ax.legend()
+
+        plt.tight_layout()
+        plt.savefig(f"{self.output_dir}/linear_probe_3d.png")
+        plt.close()
         
-        pred_latents = np.concatenate(pred_latents)   # [N, D]
-        gt_states    = np.concatenate(gt_states)      # [N, 6]
+        # pred_latents = np.concatenate(pred_latents)   # [N, D]
+        # gt_states    = np.concatenate(gt_states)      # [N, 3]
 
-        N = pred_latents.shape[0]
-        print(f"Computed N={N} latents")
-        print("pred_latents.shape=", pred_latents.shape)
-        print("gt_state.shape=", gt_states.shape)
+        # N = pred_latents.shape[0]
+        # print(f"Computed N={N} latents")
+        # print("pred_latents.shape=", pred_latents.shape)
+        # print("gt_state.shape=", gt_states.shape)
 
-        idx1 = torch.randint(0,N,(10000,))
-        idx2 = torch.randint(0,N,(10000,))
+        # idx1 = torch.randint(0,N,(10000,))
+        # idx2 = torch.randint(0,N,(10000,))
 
-        d_lat = np.linalg.norm(
-            pred_latents[idx1] - pred_latents[idx2],
-            axis=1,
-        )
+        # d_lat = np.linalg.norm(
+        #     pred_latents[idx1] - pred_latents[idx2],
+        #     axis=1,
+        # )
 
-        d_state = np.linalg.norm(
-            gt_states[idx1] - gt_states[idx2],
-            axis=1,
-        )
-        r, p = pearsonr(d_lat,d_state)
-        print("PEARSON=", r)
+        # d_state = np.linalg.norm(
+        #     gt_states[idx1] - gt_states[idx2],
+        #     axis=1,
+        # )
+        # r, p = pearsonr(d_lat,d_state)
+        # print("PEARSON=", r)
 
-        plt.figure(figsize=(6,6))
+        # plt.figure(figsize=(6,6))
 
-        plt.scatter(
-            d_state,
-            d_lat,
-            s=2,
-            alpha=0.15,
-        )
+        # plt.scatter(
+        #     d_state,
+        #     d_lat,
+        #     s=2,
+        #     alpha=0.15,
+        # )
 
-        plt.xlabel("Physical distance")
-        plt.ylabel("Latent distance")
-        plt.title(f"Pearson r = {r:.3f}")
-        plt.savefig(f"{self.output_dir}/distance_scatter.png")
-        plt.close() 
+        # plt.xlabel("Physical distance")
+        # plt.ylabel("Latent distance")
+        # plt.title(f"Pearson r = {r:.3f}")
+        # plt.savefig(f"{self.output_dir}/distance_scatter.png")
+        # plt.close() 
 
-        plt.figure()
+        # plt.figure()
 
-        plt.hist(
-            d_lat,
-            bins=100,
-        )
-        plt.savefig(f"{self.output_dir}/latent_distance_hist.png")
-        plt.close()
+        # plt.hist(
+        #     d_lat,
+        #     bins=100,
+        # )
+        # plt.savefig(f"{self.output_dir}/latent_distance_hist.png")
+        # plt.close()
 
-        embedding = umap.UMAP().fit_transform(pred_latents)
-        plt.scatter(
-            embedding[:,0],
-            embedding[:,1],
-            c=gt_states[:,3],   # cube x
-            s=3,
-            cmap="viridis",
-        )
-        plt.savefig(f"{self.output_dir}/UMAP.png")
-        plt.close()
+        # embedding = umap.UMAP().fit_transform(pred_latents)
+        # plt.scatter(
+        #     embedding[:,0],
+        #     embedding[:,1],
+        #     c=gt_states[:,3],   # cube x
+        #     s=3,
+        #     cmap="viridis",
+        # )
+        # plt.savefig(f"{self.output_dir}/UMAP.png")
+        # plt.close()
 
-        for perplexity in [1,10,20,30,50]:
+        # for perplexity in [1,10,20,30,50]:
 
-            tsne = TSNE(
-                n_components=2,
-                perplexity=perplexity,
-                learning_rate="auto",
-                init="pca",
-                random_state=42,
-            )
+        #     tsne = TSNE(
+        #         n_components=2,
+        #         perplexity=perplexity,
+        #         learning_rate="auto",
+        #         init="pca",
+        #         random_state=42,
+        #     )
 
-            latent_2d = tsne.fit_transform(
-                pred_latents
-            )
+        #     latent_2d = tsne.fit_transform(
+        #         pred_latents
+        #     )
 
-            titles = [
-                "EE X",
-                "EE Y",
-                "Block X",
-                "Block Y",
-            ]
+        #     titles = [
+        #         "EE X",
+        #         "EE Y",
+        #         "Block X",
+        #         "Block Y",
+        #     ]
 
-            for i, t in enumerate(titles):
+        #     for i, t in enumerate(titles):
 
-                plt.figure(figsize=(7,6))
-                plt.scatter(
-                    latent_2d[:,0],
-                    latent_2d[:,1],
-                    c=gt_states[:,i],   # state (i)
-                    s=5,
-                    alpha=0.7,
-                    cmap="viridis",
-                )
+        #         plt.figure(figsize=(7,6))
+        #         plt.scatter(
+        #             latent_2d[:,0],
+        #             latent_2d[:,1],
+        #             c=gt_states[:,i],   # state (i)
+        #             s=5,
+        #             alpha=0.7,
+        #             cmap="viridis",
+        #         )
 
-                plt.colorbar(label=f"t")
-                plt.title(f"t-SNE colored by {t}")
-                plt.xlabel("t-SNE 1")
-                plt.ylabel("t-SNE 2")
-                plt.savefig(f"{self.output_dir}/cube_tsne_{t}_perpl_{perplexity}.png")
+        #         plt.colorbar(label=f"t")
+        #         plt.title(f"t-SNE colored by {t}")
+        #         plt.xlabel("t-SNE 1")
+        #         plt.ylabel("t-SNE 2")
+        #         plt.savefig(f"{self.output_dir}/cube_tsne_{t}_perpl_{perplexity}.png")
 
     
 
@@ -411,7 +512,7 @@ class LinearProbeCallback(Callback):
         print(f"Training on X_train.shape={X_train.shape}")
         print(f"Validating on X_val.shape={X_val.shape}")
 
-        metrics, rows = self.run_probe_model(X_train=X_train, Y_train=Y_train, X_val=X_val, Y_val=Y_val, probe_constructor=LinearRegression, prefix="START_LINEAR")
+        metrics, rows = self.run_probe_model(X_train=X_train, Y_train=Y_train, X_val=X_val, Y_val=Y_val, probe_constructor=LinearRegression, prefix="START_LINEAR", seed=0)
 
         trainer.logger.log_metrics(metrics,step=trainer.global_step,)
         df = pd.DataFrame(rows)
@@ -465,37 +566,37 @@ class LinearProbeCallback(Callback):
         X_val, Y_val = self.collect_latents(val_loader, pl_module, self.max_val_batches)
 
         ### Collect latents once, then probe 5 times
-        N_RUNS=5
 
         all_rows = []
         all_metrics = []
 
-        for seed in range(N_RUNS):
-            LinearProbe = lambda: LinearRegression()
-            metrics, rows = self.run_probe_model(
-                X_train=X_train,
-                Y_train=Y_train,
-                X_val=X_val,
-                Y_val=Y_val,
-                probe_constructor=LinearProbe,
-                prefix="LINEAR",
-                seed=seed,          # pass into your probe
-            )
-            all_rows.extend(rows)
-            all_metrics.append(metrics)
+        seed = 0
+        LinearProbe = lambda: LinearRegression()
+        metrics, rows = self.run_probe_model(
+            X_train=X_train,
+            Y_train=Y_train,
+            X_val=X_val,
+            Y_val=Y_val,
+            probe_constructor=LinearProbe,
+            prefix="LINEAR",
+            seed=seed,          # pass into your probe
+        )
+        all_rows.extend(rows)
+        all_metrics.append(metrics)
 
-            if seed == 0:       # log the first probe only in the line plot
-                trainer.logger.log_metrics(metrics,step=trainer.global_step)
+        if seed == 0:       # log the first probe only in the line plot
+            trainer.logger.log_metrics(metrics,step=trainer.global_step)
 
 
         # linear_metrics, linear_rows = self.run_probe_model(X_train=X_train, Y_train=Y_train, X_val=X_val, Y_val=Y_val, probe_constructor=LinearRegression, prefix="LINEAR")
         # trainer.logger.log_metrics(linear_metrics,step=trainer.global_step)
 
+        N_RUNS=5
         for seed in range(N_RUNS):
             MLP_probe = lambda s=seed: MLPRegressor(
                 hidden_layer_sizes=(256,128),
                 activation="relu",
-                max_iter=1000,
+                max_iter=100,
                 random_state=s,
             )
 
@@ -504,8 +605,6 @@ class LinearProbeCallback(Callback):
 
             if seed == 0: 
                 trainer.logger.log_metrics(metrics,step=trainer.global_step)
-
-
 
         summary_df = (
             pd.DataFrame(all_rows)
@@ -753,3 +852,59 @@ class SaveCkptCallback(Callback):
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
         )
+
+
+
+class InputChannelGradNormCallback(Callback):
+    """
+    Log gradient norm of RGB / Depth input channels in the patch embedding.
+    """
+
+    def __init__(
+        self,
+        log_every_n_steps: int = 50,
+        layer_path: str = "model.encoder.embeddings.patch_embeddings.projection",
+    ):
+        self.log_every_n_steps = log_every_n_steps
+        self.layer_path = layer_path
+
+    def _get_layer(self, pl_module):
+        layer = pl_module
+        for attr in self.layer_path.split("."):
+            layer = getattr(layer, attr)
+        return layer
+
+    def on_after_backward(self, trainer, pl_module):
+
+        if trainer.global_step % self.log_every_n_steps != 0:
+            return
+
+        proj = self._get_layer(pl_module)
+        grad = proj.weight.grad
+
+        if grad is None:
+            return
+
+        rgb = grad[:, :3]
+        depth = grad[:, 3:4]
+
+        rgb_grad = rgb.pow(2).mean().sqrt()
+        depth_grad = depth.pow(2).mean().sqrt()
+
+        # rgb_grad = grad[:, :3, :, :].norm().item()
+
+        metrics = {"grad/rgb": rgb_grad}
+
+        if grad.shape[1] > 3:
+
+            # depth_grad = grad[:, 3:4, :, :].norm().item()
+
+            metrics["grad/depth"] = depth_grad
+            metrics["grad/depth_rgb_ratio"] = depth_grad / (rgb_grad + 1e-12)
+
+        logger = trainer.logger
+        if logger:
+            logger.log_metrics(
+                metrics=metrics,
+                step=trainer.global_step,
+            )

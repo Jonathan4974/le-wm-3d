@@ -36,7 +36,6 @@ class JEPA(nn.Module):
         """
 
         pixels = info['pixels'].float()
-
         # if self.sanity_checks == 0: 
 
         #     imgs = pixels[0]          # (T, C, H, W)
@@ -230,5 +229,7 @@ class JEPA(nn.Module):
         info_dict = self.rollout(info_dict, action_candidates)
 
         cost = self.criterion(info_dict)
+
+        
         
         return cost

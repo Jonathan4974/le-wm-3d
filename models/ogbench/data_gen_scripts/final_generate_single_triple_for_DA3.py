@@ -28,7 +28,7 @@ from utils import extract_data
 
 import gymnasium
 
-SOURCE_FILE = Path("~/data/ogbench/cube_single_expert.h5").expanduser()
+SOURCE_FILE = Path("~/data/ogbench/datasets/ogbench/cube_single_expert.h5").expanduser()
 print("Reading h5 from ", SOURCE_FILE)
 print("Found: ", Path(SOURCE_FILE).exists())
 EPISODE_IDS_PATH = "/home/student/users/Aaron_workspace/le-wm-3DGeom/models/le-wm/episode_order.pt"

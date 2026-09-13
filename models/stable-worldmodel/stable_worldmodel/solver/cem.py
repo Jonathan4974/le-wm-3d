@@ -209,6 +209,22 @@ class CEMSolver:
                 # Evaluate candidates
                 costs = self.model.get_cost(expanded_infos, candidates)
 
+
+                ###########################################################
+                ### DEBUG ###
+
+                if step == 0:
+                    torch.save(
+                        {
+                            "candidates": candidates.cpu(),
+                            "costs": costs.cpu(),
+                        },
+                        "cem_debug_check_modality_before_use.pt",
+                    )
+
+
+                ###########################################################
+
                 assert isinstance(costs, torch.Tensor), (
                     f'Expected cost to be a torch.Tensor, got {type(costs)}'
                 )

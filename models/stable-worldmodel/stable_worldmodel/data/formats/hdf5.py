@@ -220,6 +220,10 @@ class HDF5Dataset(Dataset):
         print("before:", self.h5_file["ep_idx"][row_idx][:10])
         print("after :", out["ep_idx"][:10])
 
+        print(out.keys())
+        print("pixels" in out)
+        print(out["pixels"].shape)
+
         return out
         
         # ORIGINAL:

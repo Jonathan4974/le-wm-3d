@@ -17,7 +17,7 @@ def save_video(path: Path, frames: list[np.ndarray], fps: int = 15) -> None:
     out.close()
 
 
-def save_panel_videos(video_dir, panels, fps: int = 15) -> None:
+def save_panel_videos(video_dir, panels, fps: int = 15, episode_indices=None, iteration=None) -> None:
     """Save one mp4 per env with labeled panels side-by-side.
 
     ``panels`` maps a label to per-env data indexable by env index. Each
@@ -45,6 +45,14 @@ def save_panel_videos(video_dir, panels, fps: int = 15) -> None:
     y_text = pad + h + max(8, lh // 4)
 
     for i in range(n_envs):
+
+        ep_idx = (
+            int(episode_indices[i])
+            if episode_indices is not None
+            else i
+        )
+
+
         env_panels = [np.asarray(panels[label][i]) for label in labels]
         T = max((len(p) for p in env_panels if p.ndim == 4), default=1)
         composed = []
@@ -60,5 +68,28 @@ def save_panel_videos(video_dir, panels, fps: int = 15) -> None:
                 b = draw.textbbox((0, 0), label, font=font)
                 x = pad + j * (w + gap) + w // 2 - (b[2] - b[0]) // 2
                 draw.text((x, y_text), label, fill=(130, 130, 130), font=font)
+
+            
+            draw.text(
+                (10, 10),
+                f"Episode {ep_idx}",
+                fill=(0, 0, 0),
+                font=font,
+            )
+            
             composed.append(np.array(img))
-        save_video(video_dir / f'env_{i}.mp4', composed, fps=fps)
+
+        if iteration:
+            filename = (
+                        f"episode_{episode_indices[i]}_env_{i}_itr_{iteration}.mp4"
+                        if episode_indices is not None
+                        else f"env_{i}_itr_{iteration}.mp4"
+                    )
+        else:
+            filename = (
+                f"episode_{episode_indices[i]}_env_{i}_itr_0.mp4"
+                if episode_indices is not None
+                else f"env_{i}_itr_0.mp4"
+            )
+
+        save_video(video_dir / filename, composed, fps=fps)

@@ -2,16 +2,22 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import open3d as o3d
+from PIL import Image
+import cv2
 
 SRC = "/home/student/data/ogbench/triple_views_with_cam_train_1_val_0_episodes.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/DA3_triple_depth_1_val_0_episodes.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/DA3_single_depth_10_val_1_episodes.h5"
-MV = "/home/student/users/Public_workspace/data_link/ogbench/cube_overfit_1_sources_1000_traj_1_actionBlocks_RGB.h5"
+# MV = "/home/student/users/Public_workspace/data_link/ogbench/cube_overfit_1_sources_1000_traj_1_actionBlocks_RGB.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/triple_views_with_cam_train_1000_val_100_episodes.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/triple_views_with_cam_train_1_val_0_episodes.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/triple_views_with_cam_train_10_val_1_episodes.h5"
 # MV = "/home/student/users/Public_workspace/data_link/ogbench/front_pixels_depth_train_1000_val_100_episodes.h5"
-# MV = "/home/student/users/Public_workspace/data_link/ogbench/gt_point_map_1_val_0_episodes.h5"
+# MV = "/home/student/users/Public_workspace/data_link/ogbench/gt_point_map_1000_val_100_episodes.h5"
+MV = "/home/student/users/Public_workspace/data_link/ogbench/DA3_triple_depth_1000_val_100_episodes.h5"
+# MV = "/home/student/users/Public_workspace/data_link/ogbench/DA3_single_depth_1000_val_100_episodes.h5"
+# MV = "/home/student/users/Public_workspace/data_link/ogbench/front_pixels_NORMALS_train_1000_val_100_episodes.h5"
+# MV = "/home/student/users/Public_workspace/data_link/ogbench/front_pixels_depth_train_1000_val_100_episodes.h5"
 
 
 # --------------------------------------------------
@@ -27,17 +33,27 @@ def inspect_structure():
         for k in f.keys():
             print(f"{k}: {f[k].shape}")
 
-        print("\nep_idx:")
-        print(f["ep_idx"][:100])
+        # print("\nep_idx:")
+        # print(f["ep_idx"][:100])
 
-        print("\noriginal_episode_ids:")
-        print(f["original_episode_ids"][:100])
+        # print("\noriginal_episode_ids:")
+        # print(f["original_episode_ids"][:100])
 
-        print("\nep_offset:")
-        print(f["ep_offset"][:100])
+        # print("\nep_offset:")
+        # print(f["ep_offset"][:100])
 
-        print("\nep_len:")
-        print(f["ep_len"][:100])
+        # print("\nep_len:")
+        # print(f["ep_len"][:100])
+
+        # print("min:", np.min(f["pixels"])) 
+        # print("max:", np.max(f["pixels"]))
+
+        '''da3 triple:
+                min: 0.249723
+                max: 1.9426256
+            da3 single:
+                min: 0.33877194
+                max: 4.2404356'''
 
         # print("\npixels_multiview:")
         # print(f["pixels_multiview"].shape)
@@ -154,7 +170,7 @@ def validate_original_mapping():
 
 
 # --------------------------------------------------
-# 5. Save visual sanity image
+# 5. Save visual sanity image of multiview
 # --------------------------------------------------
 
 def save_visualization():
@@ -185,6 +201,20 @@ def save_visualization():
         )
 
 # --------------------------------------------------
+# 5. Save visual sanity image of single view
+# --------------------------------------------------
+
+def save_single_rgb():
+    frame_num = 105
+    with h5py.File(MV, "r") as f:
+
+        img_np = f["pixels"][frame_num]
+        img = Image.fromarray(img_np.astype(np.uint8))
+        img.save("normal_frame_105.png")
+        print(
+            "\nSaved rgb_frame_105.png"
+        )
+# --------------------------------------------------
 # 6. Save DA3 depth sanity image
 # --------------------------------------------------
 def save_depth_with_colorbar():
@@ -207,21 +237,61 @@ def save_depth_with_colorbar():
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cbar.ax.set_ylabel("Depth (meters)", rotation=-90, va="bottom")
 
-        output_name = f"depth_single_with_scale_frame_{frame_num}.png"
+        output_name = f"depth_gt_with_scale_frame_{frame_num}.png"
         plt.savefig(output_name, dpi=150, bbox_inches="tight")
 
         plt.close(fig)
         print(f"Saved with colorbar: {output_name}")
 
+def save_septh_without_bar():
+    frame_num = 105
+    with h5py.File(MV, "r") as f:
 
+        depth_map = f["pixels"][frame_num]
+        depth_2d = np.squeeze(depth_map)
+
+        d_min = depth_2d.min()
+        d_max = depth_2d.max()
+
+        depth_norm = ((depth_2d - d_min) / (d_max - d_min) * 255.0).clip(0, 255).astype(np.uint8)
+
+        colored_depth = cv2.applyColorMap(depth_norm, cv2.COLORMAP_JET)
+
+        cv2.imwrite(f"depth_DA3_triple_frame_{frame_num}.png", colored_depth)
+        print(f"Saved depth map")
 # --------------------------------------------------
 # 7. Save point cloud
 # --------------------------------------------------
+def dequantize_pointcloud(q_points):
+    """
+    Args: q_points: (H, W, 3), uint16
+    Returns: points: (H, W, 3), float32
+    """
+
+    # Global quantization parameters
+    XYZ_MIN = np.array(
+        [-1.023597, -0.84242713, 0.001695069],
+        dtype=np.float32,
+    )
+
+    XYZ_MAX = np.array(
+        [0.70306283, 0.8070305, 0.39999232],
+        dtype=np.float32,
+    )
+
+    XYZ_SCALE = XYZ_MAX - XYZ_MIN
+
+    points = (
+        q_points.astype(np.float32) / 65535.0
+    ) * XYZ_SCALE + XYZ_MIN
+
+    return points
+
 def save_point_cloud():
     frame_num = 105
     with h5py.File(MV, "r") as f:
-        point_map_hw = f["pts3d"][frame_num]
-        image_hw = f["pixels"][frame_num]
+        point_map_hw = f["pixels"][frame_num]
+        image_hw = f["RGB"][frame_num]
         valid_mask = f["atten_mask"][frame_num]
 
 
@@ -232,12 +302,13 @@ def save_point_cloud():
             M_colors = image_hw[valid_mask]
 
         pcd = o3d.geometry.PointCloud()
+        # pcd.points = o3d.utility.Vector3dVector(dequantize_pointcloud(M_points))
         pcd.points = o3d.utility.Vector3dVector(M_points)
 
         if len(M_colors) > 0:
             pcd.colors = o3d.utility.Vector3dVector(M_colors)
 
-        output_path = "masked_point_cloud.ply"
+        output_path = f"point_cloud_frame_{frame_num}.ply"
         o3d.io.write_point_cloud(output_path, pcd)
         print(f"Saved point cloud: {output_path}")
 
@@ -253,3 +324,5 @@ inspect_structure()
 # save_visualization()
 # save_depth_with_colorbar()
 # save_point_cloud()
+# save_single_rgb()
+save_septh_without_bar()

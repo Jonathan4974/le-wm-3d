@@ -1,9 +1,10 @@
+from depth_anything_3 import model
 import numpy as np
 import torch
 from pathlib import Path
 from stable_pretraining import data as dt
 from lightning.pytorch.callbacks import Callback
-from custom_callbacks import LeWMPredictorIGCallback, LinearProbeCallback, RandomActionLatentMSECallback
+from custom_callbacks import LeWMPredictorIGCallback, LinearProbeCallback, RandomActionLatentMSECallback, InputChannelGradNormCallback
 from lightning.pytorch.callbacks import EarlyStopping
 
 import os
@@ -120,11 +121,7 @@ class ModelObjectCallBack(Callback):
     def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
 
-        output_path = (
-            self.dirpath
-            / f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt"
-        )
-
+        output_path = (self.dirpath / f"{self.filename}_epoch_{trainer.current_epoch + 1}_object.ckpt")
         print("Saving ckpt to ", output_path)
 
         if trainer.is_global_zero:
@@ -152,6 +149,9 @@ def instantiate_world_model(cfg):
     if cfg.concat_RGBD:
         print("CONCATENATING RGB+D")
         num_vit_channels = 4
+    elif cfg.single_channel_depth: 
+        print("\n\nUSING A SINGLE DEPTH CHANNEL \n\n")
+        num_vit_channels = 1
     else: 
         num_vit_channels = 3
 
@@ -280,7 +280,7 @@ def collect_all_callbacks(cfg, run_dir, model="jepa"):
 
     if cfg.train_epochs.get("linear_probing_active", False):
         print("\nLinear Probing Callback active")
-        probing_callback = LinearProbeCallback(every_n_epochs=1, max_train_batches=150, max_val_batches=15, model=model)
+        probing_callback = LinearProbeCallback(every_n_epochs=1, max_train_batches=150, max_val_batches=15, model=model, vit_pooling="spatial_2x2")
         all_callbacks.append(probing_callback)
 
 
@@ -288,6 +288,12 @@ def collect_all_callbacks(cfg, run_dir, model="jepa"):
         print("\RandomActionLatentMSECallback active")
         random_action = RandomActionLatentMSECallback(every_n_epochs=1, ctx_len=cfg.wm.history_size, model=model)
         all_callbacks.append(random_action)
+
+
+    if cfg.train_epochs.get("input_channel_grad", False):
+        print("\InputChannelGradNormCallback active")
+        input_grad = InputChannelGradNormCallback(log_every_n_steps = 10)
+        all_callbacks.append(input_grad)
 
     print("all callbacks=")
     print(all_callbacks)

@@ -150,7 +150,7 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 single_image = ep_images[local_idx] # (224, 224, 3)
                 img_list = [single_image] # list of images for DA3 inference
 
-                # print(f"Processing frame {local_idx} of episode {ep}, image shape: {single_image.shape}")
+                print(f"Processing frame {local_idx} of episode {ep}, image shape: {single_image.shape}")
                 prediction_single = model.inference(
                     image=img_list,
                     process_res=H,
@@ -158,7 +158,7 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 )
 
                 pred_single_depth = prediction_single.depth[0].astype(np.float32)[..., None]
-                # print(f"Predicted single depth shape: {pred_single_depth.shape}, min: {pred_single_depth.min()}, max: {pred_single_depth.max()}")
+                print(f"Predicted single depth shape: {pred_single_depth.shape}, min: {pred_single_depth.min()}, max: {pred_single_depth.max()}")
                 ep_single_depths.append(pred_single_depth)
 
                 # ===================================
@@ -167,7 +167,7 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 triple_pixels = ep_triple_pixels[local_idx] # (3, 224, 224, 3)
                 triple_cam_in = ep_triple_cam_in[local_idx] # (3, 3, 3)
                 triple_cam_ex = ep_triple_cam_ex[local_idx] # (3, 4, 4)
-                # print(f"Triple pixels shape: {triple_pixels.shape}, Triple cam_in shape: {triple_cam_in.shape}, Triple cam_ex shape: {triple_cam_ex.shape}")
+                print(f"Triple pixels shape: {triple_pixels.shape}, Triple cam_in shape: {triple_cam_in.shape}, Triple cam_ex shape: {triple_cam_ex.shape}")
 
                 triple_list = list(triple_pixels) # list of 3 images for DA3 inference
                 prediction_triple = model.inference(
@@ -180,8 +180,10 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
                 )
 
                 pred_triple_depth = prediction_triple.depth[0].astype(np.float32)[..., None]
-                # print(f"Predicted triple depth shape: {pred_triple_depth.shape}, min: {pred_triple_depth.min()}, max: {pred_triple_depth.max()}")
+                print(f"Predicted triple depth shape: {pred_triple_depth.shape}, min: {pred_triple_depth.min()}, max: {pred_triple_depth.max()}")
                 ep_triple_depths.append(pred_triple_depth)
+
+                exit(0)
 
         tgt_slice = slice(start, end)
 

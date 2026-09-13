@@ -191,7 +191,7 @@ def sanity_check_depth(depth):
 
 import gymnasium
 
-SOURCE_FILE = Path("~/data/ogbench/cube_single_expert.h5").expanduser()
+SOURCE_FILE = Path("~/data/ogbench/datasets/ogbench/cube_single_expert.h5").expanduser()
 print("Reading h5 from ", SOURCE_FILE)
 print("Found: ", Path(SOURCE_FILE).exists())
 EPISODE_IDS_PATH = "/home/student/users/Aaron_workspace/le-wm-3DGeom/models/le-wm/episode_order.pt"
@@ -202,8 +202,9 @@ N_EPISODES_TRAIN = 1000
 N_EPISODES_VAL = 100
 
 DEPTH_ONLY = False
-NORMALS = True
+NORMALS = False
 RGB_DEPTH = False
+RGB_ONLY = True
 
 train_episode_ids = episode_ids[:N_EPISODES_TRAIN]
 val_episode_ids = episode_ids[N_EPISODES_TRAIN : N_EPISODES_TRAIN + N_EPISODES_VAL]
@@ -218,6 +219,7 @@ elif DEPTH_ONLY:
 elif RGB_DEPTH: 
     TARGET_FILE = Path(f"~/data/ogbench/front_pixels_RGB_DEPTH_train_{N_EPISODES_TRAIN}_val_{N_EPISODES_VAL}_episodes.h5").expanduser()         # RGB+DEPTH
 else: 
+    print("\n\nGENERATING A NEW RGB FILE\n\n")
     TARGET_FILE = Path(f"~/data/ogbench/front_pixels_RGB_ONLY_train_{N_EPISODES_TRAIN}_val_{N_EPISODES_VAL}_episodes.h5").expanduser()          # RGB --- ATTENTION: un-tested mode
 
 print("Writing new h5 to ", TARGET_FILE)
@@ -299,6 +301,14 @@ with h5py.File(SOURCE_FILE, "r") as f_src, \
         shape=(total_frames, H, W, 4),
         dtype=np.float32,
         chunks=(8, H, W, 4),
+        compression="lzf",
+    )
+    elif RGB_ONLY:
+        pixels_ds = f_tgt.create_dataset(
+        "pixels",
+        shape=(total_frames, H, W, 3),
+        dtype=f_src["pixels"].dtype,
+        chunks=(8, H, W, 3),
         compression="lzf",
     )
     else: 

@@ -60,6 +60,8 @@ class BasePolicy:
         for arg, value in kwargs.items():
             setattr(self, arg, value)
 
+        self.sanity_checks = 0
+
     def get_action(self, obs: Any, **kwargs: Any) -> np.ndarray:
         """Get action from the policy given the observation.
 
@@ -132,9 +134,31 @@ class BasePolicy:
                         v = np.transpose(v, (0, 3, 1, 2))
                     else:
                         v = v.permute(0, 3, 1, 2)
+
+                if k.startswith("pixels"):
+                    print(f"\n\n Inside BasePolicy prepare-info: {k} before transform")
+                    print("shape:", v.shape)
+                    print("dtype:", v.dtype)
+                    print("min:", v.min())
+                    print("max:", v.max())
+
+
                 v = torch.stack(
                     [self.transform[k](tv_tensors.Image(x)) for x in v]
                 )
+
+                if k.startswith("pixels"):
+                    print(f"\n\n Inside BasePolicy prepare-info: {k} after transform")
+                    print(v.shape)
+                    print(v.dtype)
+                    print(v.min().item())
+                    print(v.max().item())
+                    print(v.mean().item())
+                    print(v.std().item())
+
+                
+
+
                 is_numpy = isinstance(v, (np.ndarray | np.generic))
 
                 if shape is not None:
@@ -357,8 +381,10 @@ class WorldModelPolicy(BasePolicy):
             The selected action(s) as a numpy array.
         """
         assert hasattr(self, 'env'), 'Environment not set for the policy'
-
+        print("entered get_action")
+        print("before prepare_info")
         info_dict = self._prepare_info(info_dict)
+        print("after")
         n_envs = self.env.num_envs
 
         needs_flush = info_dict.pop('_needs_flush', None)

@@ -95,11 +95,31 @@ class EnvPool:
                 reset. Others keep their current state in the stacked
                 info buffer.
         """
+        print("Calling EnvPool.reset() to return info_dict")
         seeds = _broadcast_arg(seed, self.num_envs, increment=True)
         opts = _broadcast_arg(options, self.num_envs)
 
         per_env_infos = [None] * self.num_envs
         for i, env in enumerate(self.envs):
+            # print("Calling reset on environment i=", i)
+
+            # print(type(self.envs[i].unwrapped))
+            # import inspect
+
+            # base = self.envs[i].unwrapped
+            # print(type(base))
+            # print(inspect.getfile(type(base)))
+
+            # env = self.envs[i]
+            # depth = 0
+
+            # while True:
+            #     print(depth, type(env))
+            #     if not hasattr(env, "env"):
+            #         break
+            #     env = env.env
+            #     depth += 1
+
             if mask is not None and not mask[i]:
                 continue
             _, per_env_infos[i] = env.reset(seed=seeds[i], options=opts[i])

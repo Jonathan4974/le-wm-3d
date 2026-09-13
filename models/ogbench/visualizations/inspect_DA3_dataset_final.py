@@ -2,18 +2,20 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
-import h5py
-import numpy as np
-import matplotlib.pyplot as plt
+from tqdm import tqdm
 
-ORIGINAL_DS = "/home/student/data/ogbench/cube_single_expert.h5"
-SRC_DA3 = "/home/student/data/ogbench/DA3_triple_depth_10_val_1_episodes.h5"
+ORIGINAL_DS = "~/data/ogbench/datasets/ogbench/cube_single_expert.h5"
+SRC_DA3 = "/home/student/data/ogbench/DA3_single_depth_1000_val_100_episodes.h5"
 SRC_PM = "/home/student/data/ogbench/gt_point_map_10_val_1_episodes.h5"
+# SRC_NORMALS= TODO 
 
-DEPTH = "/home/student/data/ogbench/front_pixels_depth_train_100_val_10_episodes.h5"
+# DEPTH_10k = "/home/student/users/Public_workspace/data_link/ogbench/front_pixels_DEPTH_ONLY_train_9000_val_1000_episodes.h5"
 
-CHECK_CURRENT = SRC_PM
-IS_POINT_MAP = True
+DEPTH_1k = "/home/student/data/ogbench/front_pixels_depth_train_1000_val_100_episodes.h5"
+RGB_DEPTH_1k = "/home/student/data/ogbench/front_pixels_RGB_DEPTH_train_1000_val_100_episodes.h5"
+
+CHECK_CURRENT = RGB_DEPTH_1k
+IS_POINT_MAP = False
 
 # --------------------------------------------------
 # 1. Dataset structure
@@ -31,6 +33,9 @@ def inspect_structure(DATASET):
 
         print("\nep_idx[:100]=")
         print(f["ep_idx"][:100])
+        print("\nep_idx[-100:]=")
+        print(f["ep_idx"][-100:])
+
 
         # print("\noriginal_episode_ids:")
         # print(f["original_episode_ids"][:100])
@@ -54,6 +59,11 @@ def inspect_structure(DATASET):
         print("\nep_len[200:400]=")
         print(f["ep_len"][200:400])
 
+        print("TRAIN SET=\n")
+        print(f["original_episode_ids"][0:999])
+
+        print("VAL SET=\n")
+        print(f["original_episode_ids"][1000:1099])
 
         
 
@@ -173,7 +183,7 @@ def save_depth_with_colorbar(DATASET):
 
         im = ax.imshow(
             depth_map,
-            cmap="inferno",
+            cmap="viridis",
             aspect="equal",
             vmin=depth_map.min(),
             vmax=depth_map.max(),
@@ -195,6 +205,18 @@ def save_depth_with_colorbar(DATASET):
         print("depth.min=", depth_map.min())
         print("depth.max=", depth_map.max())
         print("depth.mean=", depth_map.mean())
+
+def save_DA3_depth(DATASET): 
+    frame_num = 105
+    with h5py.File(DATASET, "r") as f:
+        depth_map = f["pixels"][frame_num]
+
+        output_name = f"DA3_depth_single_with_scale_frame_{frame_num}.png"
+        plt.imshow(depth_map)
+        plt.savefig(output_name, dpi=150, bbox_inches="tight")
+
+def save_NRM_depth(DATASET):
+    return 0
 
 
 def get_global_statistics(DATASET):
@@ -220,17 +242,19 @@ def get_global_statistics(DATASET):
                 print(np.percentile(arr,1))
                 print(np.percentile(arr,99))
 
-            pts = pts[0]
-            fig, ax = plt.subplots(1,3, figsize=(15,5))
-
+            pts = pts[105]
             titles = ["X", "Y", "Z"]
-
             for i in range(3):
-                im = ax[i].imshow(pts[...,i], cmap="viridis")
-                ax[i].set_title(titles[i])
-                fig.colorbar(im, ax=ax[i])
+                fig, ax = plt.subplots(figsize=(5, 5))
 
-            plt.savefig("point_map_vis.png")
+                im = ax.imshow(pts[..., i], cmap="viridis")
+                # ax.set_title(titles[i])
+                # fig.colorbar(im, ax=ax)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                plt.tight_layout()
+                plt.savefig(f"point_map_vis_{titles[i]}.png", dpi=300)
+                plt.close(fig)
 
 
         else: 
@@ -247,7 +271,7 @@ def get_global_statistics(DATASET):
 
             print("ds['pixels'].shape=", depths.shape)
 
-            for i in range(len(depths)):
+            for i in tqdm(range(len(depths))):
                 d = depths[i].astype(np.float64)
 
                 global_min = min(global_min, d.min())
@@ -277,9 +301,10 @@ def get_global_statistics(DATASET):
 
 
 inspect_structure(CHECK_CURRENT)
-validate_episode_metadata(CHECK_CURRENT)
+# validate_episode_metadata(CHECK_CURRENT)
 # validate_camera_diversity()
-validate_original_mapping(ORIGINAL_DS, CHECK_CURRENT)
+# validate_original_mapping(ORIGINAL_DS, CHECK_CURRENT)
 # save_visualization()
-save_depth_with_colorbar(CHECK_CURRENT)
-get_global_statistics(CHECK_CURRENT)
+# save_DA3_depth(CHECK_CURRENT)
+# save_depth_with_colorbar(CHECK_CURRENT)
+# get_global_statistics(CHECK_CURRENT)

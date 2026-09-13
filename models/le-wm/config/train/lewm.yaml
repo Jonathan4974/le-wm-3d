@@ -6,13 +6,15 @@ output_model_name: lewm
 subdir: ${hydra:job.id}
 run_validation: False
 run_baseline_ckpt: False
-train_num_episodes: 9000
-val_num_episodes: 1000
+train_num_episodes: 1000
+val_num_episodes: 100
 
 concat_RGBD: False
-concat_dataset: /home/student/data/ogbench/front_pixels_RGB_DEPTH_train_100_val_10_episodes
+concat_dataset: /home/student/data/ogbench/front_pixels_RGB_DEPTH_train_1000_val_100_episodes
+single_channel_depth: False
+dynamic_channel_depth: False
 
-num_workers: 0
+num_workers: 8
 train_split: 0.9
 seed: 3072
 img_size: 224
@@ -21,15 +23,16 @@ encoder_scale: tiny
 dump_object: True
 
 trainer:
-  max_epochs: 3
+  max_epochs: 10
   devices: auto
   accelerator: gpu
   precision: bf16
   gradient_clip_val: 1.0
+  log_every_n_steps: 5
 
 train_epochs:
   check_val_every_n_epoch: 1            # reduce validation and ckpts
-  save_ckpt_every_epochs: 1
+  save_ckpt_every_epochs: 5
 
   early_stop_active: False              # early stopping
   early_stop_patience: 10
@@ -38,12 +41,13 @@ train_epochs:
   integrated_gradients_active: False    # custom callbacks
   linear_probing_active: True
   rnd_action_latent_mse: True
+  input_channel_grad: True
 
 loader:
   batch_size: 32
   num_workers: ${num_workers}
   persistent_workers: True
-  prefetch_factor: 3
+  prefetch_factor: 2
   pin_memory: True
 
 optimizer:

@@ -10,11 +10,12 @@ import numpy as np
 from PIL import Image
 import stable_pretraining as spt
 import torch
+from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
-from preprocessing_eval import normal_transform, rgbd_transform, rgb_transform_call_debug_only, depth_only_transform, point_map_transform, depth_split_transform
+from preprocessing_eval import normal_transform
 
 def img_transform(cfg):
     transform = transforms.Compose(
@@ -75,7 +76,7 @@ Other metrics (+ default value):
 
 
 
-@hydra.main(version_base=None, config_path="./config/eval", config_name="cube_RGB")
+@hydra.main(version_base=None, config_path="./config/eval", config_name="cube_NRM_OGB")
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
 
@@ -85,24 +86,31 @@ def run(cfg: DictConfig):
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget
     ), "Planning horizon must be smaller than or equal to eval_budget"
-
-    # create world environment
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
     
+    # world = swm.World(
+    #     **cfg.world, 
+    #     image_shape=(224, 224), 
+    #     add_pixels=True,
+    #     add_geometry=True,
+    #     add_depths=True,
+    #     add_normals=True,
+    #     add_points=True)
+
     # obs, info = world.envs.reset()
     # action = world.envs.action_space.sample()
     # _, _, _, _, world.infos = (world.envs.step(action))
 
-    # print("After step:")
     # for k, v in world.infos.items():
     #     if isinstance(v, np.ndarray):
     #         print(k, v.shape)
 
-    # img_np = f["pixels"][0, 0]
-    # img = Image.fromarray(img_np)
+    # img_np = world.infos["pixels"][0,0]
+    # img_uint8 = ((img_np + 1.0) * 127.5).round().astype(np.uint8)
+    # img = Image.fromarray(img_uint8)
     # img.save("normal_frame_105.png")
     # print(
-    #     "\nSaved rgb_frame_105.png"
+    #     "\nSaved normal_frame_105.png"
     # )
 
     print("Running eval with the following config:")
@@ -112,31 +120,12 @@ def run(cfg: DictConfig):
 
     # create the transform
     if cfg.dataset.modality == "RGB": 
-
-        # transform = {"pixels": img_transform(cfg),"goal": img_transform(cfg),}
-        transform = {"pixels": rgb_transform_call_debug_only(),"goal": rgb_transform_call_debug_only(),}
-
+        transform = {"pixels": img_transform(cfg),"goal": img_transform(cfg),}
     elif cfg.dataset.modality == "NRM": 
         transform = {"pixels": normal_transform(cfg),"goal": normal_transform(cfg),}
-    elif cfg.dataset.modality == "RGB_D": 
-        transform =  {"pixels": rgbd_transform(cfg, debug=True),"goal": rgbd_transform(cfg, debug=True),}
-    elif cfg.dataset.modality == "DEPTH": 
-
-        if cfg.single_channel == True: 
-            transform =  {"pixels": depth_only_transform(cfg, repeat_channels=False),"goal": depth_only_transform(cfg, repeat_channels=False),}  
-
-        elif cfg.dynamic_depth == True: 
-            transform =  {"pixels": depth_split_transform(cfg),"goal": depth_split_transform(cfg),}  
-
-        else: 
-            transform =  {"pixels": depth_only_transform(cfg, repeat_channels=True),"goal": depth_only_transform(cfg, repeat_channels=True),}   
-    elif cfg.dataset.modality == "POINTMAP": 
-        transform = {"pixels": point_map_transform(),"goal": point_map_transform(),}   
     else: 
         print("Unsupported modality for transform")
         exit(1)
-
-    print("After transform definition")
 
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
 
@@ -151,8 +140,7 @@ def run(cfg: DictConfig):
 
     print("number of unique episodes in dataset: ", ep_indices.shape)
 
-    print("\nKeys in dataset: ")
-    print(dataset._keys)
+
 
     process = {}
     for col in cfg.dataset.keys_to_cache:
@@ -194,7 +182,6 @@ def run(cfg: DictConfig):
         if cfg.policy != "random"
         else Path(__file__).parent
     )
-    results_file = results_path / cfg.output.filename
 
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
@@ -211,30 +198,8 @@ def run(cfg: DictConfig):
     ep_idx = dataset.get_col_data("ep_idx")
 
     if getattr(dataset, "orig_to_internal", None) is not None:
-        print("\n********\nDATASET NEEDS RE-MAPPING OF INDICES\n********")
         mapper = np.vectorize(dataset.orig_to_internal.__getitem__)
         ep_idx = mapper(ep_idx)
-
-    '''
-    # If the dataset has an original->internal mapping (e.g. depth),
-    # use the internal episode indices.
-    if dataset.orig_to_internal is not None:
-        valid_mask &= (
-            ep_idx >= cfg.eval.first_episode
-        ) & (
-            ep_idx <= cfg.eval.last_episode
-        )
-    else: 
-        # RGB dataset: evaluate on the same original episodes as the depth validation set.
-        # since RGB internal indexing already has the original ep id's, no need to re-map
-        episode_order = torch.load("episode_order.pt")
-        val_episode_ids = episode_order[cfg.eval.first_episode : cfg.eval.last_episode + 1]
-        print("\n\n")
-
-        print(val_episode_ids)
-        print(f"\nEvaluating RGB on {len(val_episode_ids)} episodes")
-        valid_mask &= np.isin(ep_idx, val_episode_ids)
-    '''
 
     valid_mask &= (
         ep_idx >= cfg.eval.first_episode
@@ -251,7 +216,9 @@ def run(cfg: DictConfig):
     # print(valid_mask.sum(), "valid starting points found for evaluation.")
 
     g = np.random.default_rng(cfg.seed)
-    random_episode_indices = g.choice(len(valid_indices) - 1, size=cfg.eval.num_total_eval, replace=False)
+    random_episode_indices = g.choice(
+        len(valid_indices) - 1, size=cfg.eval.num_total_eval, replace=False
+    )
 
     # sort increasingly to avoid issues with HDF5Dataset indexing
     random_episode_indices = np.sort(valid_indices[random_episode_indices])
@@ -266,7 +233,9 @@ def run(cfg: DictConfig):
     print("num episodes:", len(dataset.offsets))
     print(dataset.get_col_data("ep_idx")[:20])
     print(dataset.get_col_data("ep_idx").max())
+
     print("\n\nALL EVAL EPISODE INDICES: ", eval_episodes)
+
     print("\n\nNumber of episodes to rollout = ", len(eval_episodes))
 
     if len(eval_episodes) < cfg.eval.num_eval:
@@ -278,18 +247,18 @@ def run(cfg: DictConfig):
         'episode_successes': [],
         'seeds': 0
         }
-    iteration = 0
-
+    iteration = 1
     for start in range(0, len(eval_episodes), batch_size):
         batch_eps = eval_episodes[start:start+batch_size]
         batch_steps = eval_start_idx[start:start+batch_size]
 
+        # create world environment
         world = swm.World(
-        **cfg.world, 
-        image_shape=(224, 224), 
-        modality=cfg.dataset.modality,
-        )
-
+            **cfg.world, 
+            image_shape=(224, 224), 
+            modality=cfg.dataset.modality,
+            )
+            
         world.set_policy(policy)
 
         start_time = time.time()
@@ -301,56 +270,37 @@ def run(cfg: DictConfig):
             eval_budget=cfg.eval.eval_budget,
             callables=OmegaConf.to_container(cfg.eval.get("callables"), resolve=True),
             video=results_path,
-            iteration=iteration,
+            iteration=iteration
         )
         end_time = time.time()
-        print("returned from world.evaluate")
-        
         print(metrics)
-        print(final_results)
-        final_results['episode_successes'].extend(metrics['episode_successes'].tolist())
-        
-        print("\n\n ==== ITERATION FINISHED ====, current success rate = ", float(sum(final_results['episode_successes'])) / len(final_results['episode_successes']) * 100.0)
-        with results_file.open("a") as f:
-            f.write("\n")  # separate from previous runs
-    
-            f.write(f"==== ITERATION = {iteration} ====\n")
-            f.write(f"metrics: {metrics}\n")
-            f.write(f"current success rate = {float(sum(final_results['episode_successes'])) / len(final_results['episode_successes']) * 100.0}")
 
+        final_results['episode_successes'].extend(metrics['episode_successes'].tolist())
 
         iteration += 1
 
-        
     final_results['success_rate'] = (
         float(sum(final_results['episode_successes'])) / len(final_results['episode_successes']) * 100.0
-    )
-    final_results["success_rate"] = (
-        100.0 * sum(final_results["episode_successes"])
-        / len(final_results["episode_successes"])
     )
 
     final_results["seeds"] = metrics["seeds"]
         
     print(final_results)
 
-    print("Writing results to: ", results_path)
-    print("metrics:", metrics["success_rate"])
-    print("final:", final_results["success_rate"])
-    print(len(final_results["episode_successes"]))
-    print(sum(final_results["episode_successes"]))
+    results_path = results_path / cfg.output.filename
+    results_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with results_file.open("a") as f:
+    print("Writing results to: ", results_path)
+
+    with results_path.open("a") as f:
         f.write("\n")  # separate from previous runs
 
         f.write("==== CONFIG ====\n")
         f.write(OmegaConf.to_yaml(cfg))
         f.write("\n")
 
-        f.write("==== FINAL RESULTS ====\n")
-        f.write(f"success_rate: {final_results['success_rate']}\n")
-        f.write(f"num_successes: {sum(final_results['episode_successes'])}\n")
-        f.write(f"num_episodes: {len(final_results['episode_successes'])}\n")
+        f.write("==== RESULTS ====\n")
+        f.write(f"metrics: {metrics}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")
 
 

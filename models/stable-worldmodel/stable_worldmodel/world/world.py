@@ -124,6 +124,12 @@ class World:
         goal_transform: Callable | None = None,
         image_resample: str | int | None = None,
         add_pixels: bool = True,
+        add_geometry: bool = False,
+        add_depths: bool = False,
+        add_normals: bool = False,
+        add_points: bool = False,
+        camera_name: list[str] | None = None,
+        modality: str = None,
         **kwargs: Any,
     ):
         if add_pixels and image_shape is None:
@@ -138,6 +144,12 @@ class World:
                 separate_goal=goal_conditioned,
                 image_resample=image_resample,
                 add_pixels=add_pixels,
+                add_geometry=add_geometry,
+                add_depths=add_depths,
+                add_normals=add_normals,
+                add_points=add_points,
+                camera_name=camera_name,
+                modality=modality,
             ),
             *(extra_wrappers or []),
         ]
@@ -181,6 +193,9 @@ class World:
 
         Clears ``terminateds``/``truncateds`` back to all-False.
         """
+
+        print("Calling World.reset()")
+
         _, self.infos = self.envs.reset(seed=seed, options=options)
         self.terminateds = np.zeros(self.num_envs, dtype=bool)
         self.truncateds = np.zeros(self.num_envs, dtype=bool)
@@ -198,6 +213,7 @@ class World:
         goal_offset: int | None = None,
         eval_budget: int | None = None,
         callables: list[dict] | None = None,
+        iteration: int | None = None,
     ) -> dict:
         """Run the attached policy and return aggregated metrics.
 
@@ -253,6 +269,7 @@ class World:
                 callables,
                 video,
                 mode,
+                iteration
             )
         mode = reset_mode or 'auto'
         return self._evaluate(episodes, seed, options, video, mode)
@@ -404,17 +421,28 @@ class World:
         ep_count = 0
 
         for t in range(max_steps if max_steps is not None else 2**63):
+            print(f"_run_iter iteration {t}")
             actions = self._get_actions()
+            print("returned from _get_actions")
 
             mask = alive if not alive.all() else None
             _, self.rewards, self.terminateds, self.truncateds, self.infos = (
                 self.envs.step(actions, mask=mask)
             )
+            print("returned from env.step")
+            print("reward:", self.rewards)
+            print("terminated:", self.terminateds)
+            print("truncated:", self.truncateds)
+            print("success:", self.infos["success"])
+            print("step_idx:", self.infos["step_idx"])
+
+
 
             if on_step:
                 on_step(self)
 
             done = alive & (self.terminateds | self.truncateds)
+            print("done =", done)
             if not done.any():
                 continue
 
@@ -449,6 +477,9 @@ class World:
                 return
 
     def _get_actions(self) -> np.ndarray:
+        print("_get_actions")
+        print(type(self.infos))
+        print(self.infos.keys())
         return self.policy.get_action(self.infos)
 
     def _evaluate(self, episodes, seed, options, video, mode) -> dict:
@@ -502,11 +533,14 @@ class World:
         callables,
         video,
         mode,
+        iteration,
     ) -> dict:
         n = len(episodes_idx)
         assert n == self.num_envs
 
-        init_state, goal_state, dataset_videos = _extract_init_goal(
+        print("\nInside _evaluate_from_dataset")
+
+        init_state, goal_state, dataset_qpos_qvel = _extract_init_goal(
             dataset,
             episodes_idx,
             start_steps,
@@ -514,7 +548,6 @@ class World:
         )
 
         self.reset(seed=init_state.get('seed'))
-        print("After reset:")
         for k, v in self.infos.items():
             if isinstance(v, np.ndarray):
                 print(k, v.shape)
@@ -522,6 +555,7 @@ class World:
 
 
         if callables:
+            print("\n\nCallables = True")
             merged = {**init_state, **goal_state}
             for i in range(n):
                 env_init = {k: v[i] for k, v in merged.items()}
@@ -545,32 +579,119 @@ class World:
             'episode_successes': np.zeros(n, dtype=bool),
             'seeds': init_state.get('seed'),
         }
-        frames: dict[int, list] = defaultdict(list) if video else None
+        # frames: dict[int, list] = defaultdict(list) if video else None
+        frames_pos_qvel = defaultdict(lambda: defaultdict(list)) if video else None
 
         def on_step(world):
             world.infos.update(deepcopy(goal_snapshot))
             results['episode_successes'] |= world.terminateds
-            if frames is not None:
+            # if frames is not None:
+            #     for i in range(world.num_envs):
+            #         f = world.infos['pixels'][i]            # TODO change to pixels_rgb
+            #         frame = f[-1] if f.ndim > 3 else f
+            #         frames[i].append(np.asarray(frame).copy())
+            if frames_pos_qvel is not None:
                 for i in range(world.num_envs):
-                    f = world.infos['pixels'][i]
-                    frame = f[-1] if f.ndim > 3 else f
-                    frames[i].append(np.asarray(frame).copy())
+                    f_qpos = world.infos['qpos'][i]           
+                    qpos = f_qpos[-1]
+                    frames_pos_qvel[i]['qpos'].append(np.asarray(qpos).copy())
 
+                    f_qvel = world.infos['qvel'][i]           
+                    qvel = f_qvel[-1]
+                    frames_pos_qvel[i]['qvel'].append(np.asarray(qvel).copy())
+
+        print("Before self.run()")
         self._run(max_steps=eval_budget, mode=mode, on_step=on_step)
+        print("After self.run()")
 
         results['success_rate'] = (
             float(results['episode_successes'].sum()) / n * 100.0
-        )
-        if frames:
+        )        
+
+        if frames_pos_qvel:
+            # render image from env with qpos and qvel
+            render_env = self.envs.envs[0]
+
+            # for dataset
+            dataset_videos = _render__env_rgb(render_env, n, dataset_qpos_qvel)
+
+            # for agent rollout
+            frames = _render__env_rgb(render_env, n, frames_pos_qvel)
+
+            # for goal state
+            print("goal_qpos:", goal_state['goal_qpos'].shape)
+            goal_rgb_list: list = []
+            for ep in range(n):
+                render_env.unwrapped.set_state(goal_state['goal_qpos'][ep], goal_state['goal_qvel'][ep])
+                goal_rgb_list.append(render_env.unwrapped.render()) 
+
             save_panel_videos(
                 Path(video),
                 {
                     'agent': frames,
                     'dataset': dataset_videos,
-                    'goal': goal_state['goal'],
+                    'goal': goal_rgb_list,
                 },
+                episode_indices=episodes_idx,
+                iteration=iteration,
             )
+
+            _save_episode_frames(Path(video), "agent", frames, episodes_idx, iteration, 5)
+            _save_episode_frames(Path(video), "ds", dataset_videos, episodes_idx, iteration, 5)
         return results
+
+
+def _render__env_rgb(env, num_env, qpos_qvel:list[dict[str, list]]):
+    videos: list = []
+    for ep in range(num_env):
+        ep_qpos = qpos_qvel[ep]['qpos']
+        ep_qvel = qpos_qvel[ep]['qvel']
+        ep_video = []
+        for qpos, qvel in zip(ep_qpos, ep_qvel):
+            env.unwrapped.set_state(qpos, qvel)
+            ep_video.append(env.unwrapped.render())
+        videos.append(np.stack(ep_video))
+
+    return videos
+
+
+import os
+from PIL import Image
+
+def _save_episode_frames(save_dir, env_postfix, frames, episodes_indices, iteration, frame_skip=1):
+    if isinstance(frames, torch.Tensor):
+        frames = frames.detach().cpu().numpy()
+    elif isinstance(frames, list) and len(frames) > 0 and isinstance(frames[0], torch.Tensor):
+        frames = [f.detach().cpu().numpy() for f in frames]
+
+    if frame_skip < 1:
+        raise ValueError("frame_skip have to be int and >= 1")
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    for i, (ep_frames, ep_idx) in enumerate(zip(frames, episodes_indices)):
+        if iteration:
+            env_dir = os.path.join(save_dir, f"ep_{ep_idx}_env_{i}_itr_{iteration}_{env_postfix}")
+        else:
+            env_dir = os.path.join(save_dir, f"ep_{ep_idx}_env_{i}_itr_{iteration}_{env_postfix}")
+        os.makedirs(env_dir, exist_ok=True)
+
+        selected_frames = ep_frames[::frame_skip]
+
+        for step_idx, frame in enumerate(selected_frames):
+            if frame.dtype != np.uint8:
+                if frame.max() <= 1.0:
+                    frame = (frame * 255).astype(np.uint8)
+                else:
+                    frame = frame.astype(np.uint8)
+
+            img = Image.fromarray(frame, mode='RGB')
+            
+            actual_frame_idx = step_idx * frame_skip
+            img_path = os.path.join(env_dir, f"frame_{actual_frame_idx:05d}.png")
+            
+            img.save(img_path)
+
 
 
 def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
@@ -582,9 +703,11 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
 
     init_lists: dict[str, list] = {}
     goal_lists: dict[str, list] = {}
-    dataset_videos: list = []
+    # dataset_videos: list = []
+    dataset_qpos_qvel: list = []
 
     for ep in data:
+        episode_qpos_qvel: dict[str, list] = {}
         for col in dataset.column_names:
             if col.startswith('goal'):
                 continue
@@ -596,15 +719,20 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
             init_lists.setdefault(col, []).append(arr[0])
             goal_lists.setdefault(col, []).append(arr[-1])
-            if col == 'pixels':
-                dataset_videos.append(arr)
+            # if col == 'pixels':                     # TODO change to pixels_rgb
+            #     dataset_videos.append(arr)
+            if col == 'qpos':                     
+                episode_qpos_qvel["qpos"] = arr
+            if col == 'qvel':                     
+                episode_qpos_qvel["qvel"] = arr
+        dataset_qpos_qvel.append(episode_qpos_qvel)
 
     init_state = {k: np.stack(v) for k, v in init_lists.items()}
     goal_state = {}
     for k, v in goal_lists.items():
         goal_state['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
 
-    return init_state, goal_state, dataset_videos
+    return init_state, goal_state, dataset_qpos_qvel
 
 
 def _apply_callables(env, callables, init_state):

@@ -22,11 +22,9 @@ from utils import get_column_normalizer, get_img_preprocessor, instantiate_world
             sanity_check_on_loaded_batch, collect_all_callbacks
 from utils import ModelObjectCallBack, LinearProbeCallback
 
-from custom_callbacks import LatentTSENPlots
-
 from preprocessing import depth_img_preprocessor, normal_img_preprocessor, rgbd_img_preprocessor, \
                     da3_img_preprocessor, point_map_preprocessor, depth_da3_single_img_preprocessor, \
-                    depth_da3_triple_img_preprocessor, depth_split_img_preprocessor
+                    depth_da3_triple_img_preprocessor
 
 from torch.utils.data import Subset
 import random
@@ -42,8 +40,6 @@ def lejepa_forward(self, batch, stage, cfg):
 
     # Replace NaN values with 0 (occurs at sequence boundaries)
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
-    # print(batch["action"][0])  # print the first action tensor after NaN replacement to verify
-    # print("Encoding batch")
 
     output = self.model.encode(batch)           # [B,T,D]                           
 
@@ -56,9 +52,6 @@ def lejepa_forward(self, batch, stage, cfg):
     ctx_emb = emb[:, :ctx_len]
     ctx_act = act_emb[:, :ctx_len]
     tgt_emb = emb[:, n_preds:].contiguous()
-
-    # ctx_emb = emb[:, :ctx_len]
-    # ctx_act = act_emb[:, : ctx_len]
 
     # print("Context embeddings shape: ", ctx_emb.shape)
     # print("Context action embeddings shape: ", ctx_act.shape)
@@ -98,38 +91,16 @@ def run(cfg):
     RUN_OUTPUT_DIR=f"/home/student/users/Public_workspace/le-wm-3DGeom/models/le-wm/outputs/results_16_07/{dataset_name_without_full_path}/{run_timestamp}"
     os.makedirs(RUN_OUTPUT_DIR,exist_ok=True )
 
-    DEPTH = "depth" in cfg.data.dataset.name.lower()
-    NORMALS = "normals" in cfg.data.dataset.name.lower()
-    POINT_MAP = "point" in cfg.data.dataset.name.lower()
+
     RGB_DEPTH = "rgb_depth" in cfg.data.dataset.name.lower()
-    DA3_DEPTH = "da3" in  cfg.data.dataset.name.lower()
+
+    if not RGB_DEPTH:
+        print("Using the wrong dataset!")
+        exit(1)
 
     dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
 
-    if (RGB_DEPTH):
-        print("Initializing RGBD preprocessor\n")
-        transforms = [rgbd_img_preprocessor(img_size=cfg.img_size,)]       # RGB+D
-    elif DA3_DEPTH: 
-        print("Initializing DA3 preprocessor\n")
-        transforms = [depth_da3_triple_img_preprocessor(img_size=cfg.img_size)]
-    elif DEPTH: 
-        print("Initializing DEPTH preprocessor\n")
-        if cfg.single_channel_depth == True: 
-            transforms = [depth_img_preprocessor(cfg.img_size, repeat_channels=False)]  
-        elif cfg.dynamic_channel_depth == True: 
-            print("\n\nDYNAMIC CHANNELS\n\n")
-            transforms = [depth_split_img_preprocessor(cfg.img_size)]
-        else: 
-            transforms = [depth_img_preprocessor(cfg.img_size)]                             # DEPTH
-    elif POINT_MAP: 
-        print("Initializing POINT MAP preprocessor\n")
-        transforms = [point_map_preprocessor(cfg.img_size)]
-    elif NORMALS: 
-        print("Initializing NORMS preprocessor\n")
-        transforms = [normal_img_preprocessor(cfg.img_size)]                            # NORMALS
-    else:
-        print("Initializing RGB preprocessor\n")
-        transforms = [get_img_preprocessor(source='pixels', target='pixels', img_size=cfg.img_size)]    # RGB
+    transforms = [rgbd_img_preprocessor(img_size=cfg.img_size,)]       # RGB+D
     
     logger = None
     if cfg.wandb.enabled:
@@ -173,63 +144,20 @@ def run(cfg):
     ##       DATALOADERS      ##
     ##############################
     rnd_gen = torch.Generator().manual_seed(cfg.seed)
-    print("dataset samples=", len(dataset))
     train_loader = torch.utils.data.DataLoader(dataset, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen)
     val_loader = train_loader
     print("number of batches in data loader=", len(train_loader))
-
-    print("\n\nInspect a single sample from the dataset")
-    ## SANITY CHECKS
-
-    sample = dataset[0]
-    for k, v in sample.items():
-        if hasattr(v, "shape"):
-            print(k, v.shape)
-        else:
-            print(k, type(v))
-    img = sample["pixels"]
-    print("img.shape=", img.shape)
-    print("img.dtype=", img.dtype)
-    print(img.min(), img.max())
-    print(img.mean(), img.std())
-
-    if DEPTH: 
-        frame0 = sample["pixels"][0, 0].cpu().numpy()   # first frame, first channel
-
-        # Undo [-1,1] normalization
-        frame0 = (frame0 + 1.0) / 2.0
-        frame0 = frame0 * (3.0 - 0.5) + 0.5
-
-        plt.figure(figsize=(5,5))
-        plt.imshow(frame0, cmap="viridis", vmin=0.5, vmax=3.0)
-        plt.colorbar(label="Depth (m)")
-        plt.axis("off")
-
-        outfile = f"{RUN_OUTPUT_DIR}/depth_after_pipeline.png"
-        plt.savefig(outfile, dpi=200, bbox_inches="tight")
-        plt.close()
-
-
-    print("\n\nInspect a full batch from the dataloader")
-    batch = next(iter(train_loader))
-    sanity_checks_output_dir = f"{RUN_OUTPUT_DIR}/sanity_checks"
-    os.makedirs(sanity_checks_output_dir, exist_ok=True)
-    sanity_check_on_loaded_batch(batch, depth=DEPTH, output_dir=sanity_checks_output_dir)
-
 
     all_episode_ids = torch.load("episode_order.pt")
     print(all_episode_ids[:10])
 
     train_episode_count = cfg.train_num_episodes
-
     print("\n\ntrain_episode_count=", train_episode_count)
 
     # Fixed validation split:
     selected_train_episodes = set(all_episode_ids[0:train_episode_count])
     selected_val_episodes   = set(all_episode_ids[train_episode_count:train_episode_count+cfg.val_num_episodes])
 
-    # print(selected_train_episodes)
-    # print(selected_val_episodes)
     print(dataset.episode_ids[:20])
 
     train_indices = [
@@ -259,11 +187,6 @@ def run(cfg):
     print("clip_indices[20:]=", dataset.clip_indices[:20])
 
     train_loader = torch.utils.data.DataLoader(train_set,**cfg.loader,shuffle=True,drop_last=True,generator=rnd_gen,)
-
-    # val_kwargs = dict(cfg.loader)
-    # val_kwargs["persistent_workers"] = False
-    # val_kwargs["prefetch_factor"] = None
-    # val_kwargs["num_workers"] = 16
     val_loader = torch.utils.data.DataLoader(val_set,**cfg.loader,shuffle=False,drop_last=False,)
 
     print()
@@ -350,6 +273,7 @@ def run(cfg):
 
         latent_plots_dir = "latent_plots/"
         
+
         trainer = pl.Trainer(
             **cfg.trainer,
             callbacks=all_callbacks,
@@ -358,12 +282,8 @@ def run(cfg):
             enable_checkpointing=False,
         )
 
-        # probe_callback = LinearProbeCallback()
-        # probe_callback.run_probe_call(train_loader=train_loader, val_loader=val_loader, trainer=trainer, pl_module=world_model)
-
-        latent_plots_callback = LatentTSENPlots(latent_plots_dir)
-        latent_plots_callback.compute_latent_plots(val_loader=val_loader, pl_module=world_model)
-
+        probe_callback = LinearProbeCallback()
+        probe_callback.run_probe_call(train_loader=train_loader, val_loader=val_loader, trainer=trainer, pl_module=world_model)
 
         print("\n\nValidation on baseline checkpoint complete. ")
         
